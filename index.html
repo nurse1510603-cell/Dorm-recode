@@ -34,7 +34,11 @@
     .btn-main { color: #FFF; }
     body[data-active="mauii"] .btn-main { background: var(--mauii-primary); }
     body[data-active="moana"] .btn-main { background: var(--moana-primary); }
+    .btn-secondary { background: #EAEFEA; color: var(--text-main); }
     .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px; padding: 8px; }
+    .form-group { margin-top: 10px; text-align: left; }
+    .form-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .form-group input { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 14px; }
     .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; text-align: center; }
     .cal-day-header { font-size: 11px; color: var(--text-muted); }
     .cal-day { padding: 6px 0; border-radius: 6px; background: #F8FAF8; border: 1px solid var(--border-color); font-size: 11px; cursor: pointer; }
@@ -68,6 +72,21 @@
     <div class="stats-title" style="margin-bottom: 8px;">快速打卡</div>
     <div id="checkin-status" style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">目前狀態：尚未刷卡進入</div>
     <button class="btn btn-main" id="btn-action" onclick="handleCheckInAction()">刷卡進入宿舍</button>
+    
+    <!-- 手動補登區塊 -->
+    <details style="margin-top: 14px;">
+      <summary style="font-size: 13px; color: var(--text-muted); cursor: pointer;">手動補登歷史紀錄</summary>
+      <div class="form-group">
+        <label>進入時間</label>
+        <input type="datetime-local" id="manual-in">
+      </div>
+      <div class="form-group">
+        <label>離開時間</label>
+        <input type="datetime-local" id="manual-out">
+      </div>
+      <button class="btn btn-secondary" onclick="addManualRecord()" style="margin-top: 10px;">確認補登紀錄</button>
+    </details>
+
     <div class="sync-status" id="sync-status-text">雲端狀態：已自動連線</div>
   </div>
 
@@ -91,7 +110,6 @@
 
   <script>
     let activeUser = 'mauii';
-    // 已直接內建您的 Google Apps Script API 網址
     let SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyAROfrrz8kH8cx4yRWJft8frMoEhG7SPYtPrgnqdECCN4yLjYysdU5nJ6wkf6X0urjvw/exec';
 
     let appData = JSON.parse(localStorage.getItem('dorm_app_data_v7')) || {
@@ -125,6 +143,28 @@
       saveData();
     }
 
+    function addManualRecord() {
+      const inVal = document.getElementById('manual-in').value;
+      const outVal = document.getElementById('manual-out').value;
+      if (!inVal || !outVal) return alert('請選擇進入與離開時間！');
+      
+      const hours = (new Date(outVal) - new Date(inVal)) / 3600000;
+      if (hours <= 0) return alert('離開時間必須晚於進入時間！');
+
+      appData[activeUser].records.unshift({
+        id: Date.now(),
+        checkIn: new Date(inVal).toISOString(),
+        checkOut: new Date(outVal).toISOString(),
+        hours: parseFloat(hours.toFixed(1)),
+        isValid: hours >= 4
+      });
+
+      document.getElementById('manual-in').value = '';
+      document.getElementById('manual-out').value = '';
+      saveData();
+      alert('補登成功！已同步至雲端');
+    }
+
     function toggleOffDay(dateStr) {
       if (!appData[activeUser].offDays) appData[activeUser].offDays = {};
       appData[activeUser].offDays[dateStr] = !appData[activeUser].offDays[dateStr];
@@ -135,7 +175,6 @@
       if (confirm('確定刪除此筆紀錄？後台也會同步刪除')) {
         appData[activeUser].records = appData[activeUser].records.filter(r => r.id !== id);
         saveData();
-        // 發送刪除指令至 Google 試算表
         if (SHEET_API_URL) {
           fetch(SHEET_API_URL, {
             method: 'POST',
@@ -224,6 +263,12 @@
         </div>
       `).join('') || '<div style="font-size:12px; color:var(--text-muted); text-align:center;">無紀錄</div>';
     }
+
+    // 預設補登時間為現在
+    const localNow = new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const fourHrsAgo = new Date(new Date().getTime() - (4 * 3600000) - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    document.getElementById('manual-out').value = localNow;
+    document.getElementById('manual-in').value = fourHrsAgo;
 
     render();
   </script>

@@ -163,7 +163,7 @@
 
     // 嚴格審閱後無重複的 10、11 月標準跨日紀錄
     const cleanRecords = [
-      // 11 月紀錄 (精確對應截圖)[cite: 8, 10]
+      // 11 月紀錄[cite: 8, 10]
       { id: 1731800000001, checkIn: "2026-11-17T07:46:00", checkOut: "2026-11-17T07:47:00", hours: 0.0, isValid: false },
       { id: 1731800000002, checkIn: "2026-11-16T16:53:00", checkOut: "2026-11-16T21:16:00", hours: 4.4, isValid: true },
       { id: 1731800000003, checkIn: "2026-11-13T00:16:00", checkOut: "2026-11-13T11:27:00", hours: 11.2, isValid: true },
@@ -172,7 +172,7 @@
       { id: 1731800000006, checkIn: "2026-11-05T23:23:00", checkOut: "2026-11-06T07:52:00", hours: 8.5, isValid: true },
       { id: 1731800000007, checkIn: "2026-11-04T22:35:00", checkOut: "2026-11-05T08:16:00", hours: 9.7, isValid: true },
       
-      // 10 月紀錄 (精確對應截圖)[cite: 8, 9]
+      // 10 月紀錄[cite: 8, 9]
       { id: 1729200000001, checkIn: "2026-10-28T07:32:00", checkOut: "2026-10-28T20:57:00", hours: 13.4, isValid: true },
       { id: 1729200000002, checkIn: "2026-10-27T00:03:00", checkOut: "2026-10-27T01:52:00", hours: 25.8, isValid: true },
       { id: 1729200000003, checkIn: "2026-10-26T00:00:00", checkOut: "2026-10-26T07:38:00", hours: 7.6, isValid: true },
@@ -187,13 +187,13 @@
       { id: 1729200000012, checkIn: "2026-10-01T21:32:00", checkOut: "2026-10-02T07:32:00", hours: 10.0, isValid: true }
     ];
 
-    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v13')) || {
+    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v15')) || {
       mauii: { currentCheckIn: null, records: cleanRecords, dayStatus: {} },
       moana: { currentCheckIn: null, records: cleanRecords, dayStatus: {} }
     };
 
     function saveData() {
-      localStorage.setItem('dorm_app_data_v13', JSON.stringify(appData));
+      localStorage.setItem('dorm_app_data_v15', JSON.stringify(appData));
       render();
       syncToCloud(false);
     }
@@ -256,7 +256,7 @@
         }
       }
 
-      appData[activeUser].records.unshift({
+      u.records.unshift({
         id: Date.now(),
         checkIn: new Date(inVal).toISOString(),
         checkOut: new Date(outVal).toISOString(),
@@ -295,19 +295,25 @@
 
     function syncToCloud(showAlert = true) {
       document.getElementById('sync-status-text').innerText = '雲端狀態：同步中...';
+      
+      const u = appData[activeUser];
+      const uniqueMap = {};
+      u.records.forEach(r => { uniqueMap[r.id] = r; });
+      const uniqueRecords = Object.values(uniqueMap);
+
       fetch(SHEET_API_URL, {
         method: 'POST',
         mode: 'no-cors',
         body: JSON.stringify({
           action: 'sync',
           user: activeUser,
-          records: appData[activeUser].records,
-          dayStatus: appData[activeUser].dayStatus
+          records: uniqueRecords,
+          dayStatus: u.dayStatus
         })
       })
       .then(() => {
         document.getElementById('sync-status-text').innerText = '雲端狀態：已同步至 Google 試算表 ✔';
-        if (showAlert) alert('成功發送同步至 Google 試算表！');
+        if (showAlert) alert('成功發送同步至 Google 試算表（已自動防重複）！');
       })
       .catch(() => {
         document.getElementById('sync-status-text').innerText = '雲端狀態：離線儲存中';
@@ -324,9 +330,10 @@
             if (cloudData[u]) {
               const localIn = appData[u].currentCheckIn;
               if (cloudData[u].records && cloudData[u].records.length > 0) {
-                if (cloudData[u].records.length >= appData[u].records.length) {
-                  appData[u].records = cloudData[u].records.sort((a, b) => b.id - a.id);
-                }
+                const mergedMap = {};
+                cloudData[u].records.forEach(r => { mergedMap[r.id] = r; });
+                appData[u].records.forEach(r => { mergedMap[r.id] = r; });
+                appData[u].records = Object.values(mergedMap).sort((a, b) => b.id - a.id);
               }
               if (cloudData[u].dayStatus && Object.keys(cloudData[u].dayStatus).length > 0) {
                 appData[u].dayStatus = Object.assign({}, cloudData[u].dayStatus, appData[u].dayStatus);
@@ -334,7 +341,7 @@
               appData[u].currentCheckIn = localIn;
             }
           });
-          localStorage.setItem('dorm_app_data_v13', JSON.stringify(appData));
+          localStorage.setItem('dorm_app_data_v15', JSON.stringify(appData));
           render();
           document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
           if (showAlert) alert('已成功從 Google 試算表載入最新資料！');
@@ -352,11 +359,14 @@
 
       document.getElementById('month-title').innerText = `${targetMonth} 月已達標總次數 (目標 10 次，一進一出 ≥ 4h)`;
 
-      // 以「進入時間 (checkIn)」的月份作為該筆紀錄歸屬的月份
-      const monthRecords = u.records.filter(r => {
+      const uniqueMap = {};
+      u.records.forEach(r => { uniqueMap[r.id] = r; });
+      const cleanList = Object.values(cleanRecords.concat(Object.values(uniqueMap)));
+      
+      const monthRecords = cleanList.filter(r => {
         const d = new Date(r.checkIn);
         return (d.getMonth() + 1) === targetMonth && d.getFullYear() === targetYear;
-      });
+      }).sort((a, b) => new Date(b.checkIn) - new Date(a.checkIn));
 
       const validRecords = monthRecords.filter(r => r.isValid);
       const validCount = validRecords.length;
@@ -420,7 +430,6 @@
         summaryEl.innerHTML = `<b style="color:var(--home-text);">⚠️ 還差 ${neededCount - stayCount} 天綠色住宿日才能湊滿 10 次</b>`;
       }
 
-      // 明確呈現跨日時間格式：進 (幾月幾號幾點) ➔ 出 (幾月幾號幾點)
       const listEl = document.getElementById('records-list');
       listEl.innerHTML = monthRecords.map(r => {
         const dIn = new Date(r.checkIn);

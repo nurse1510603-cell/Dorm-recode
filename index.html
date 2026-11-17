@@ -22,6 +22,7 @@
     .user-btn { flex: 1; border: none; padding: 12px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--text-muted); background: transparent; transition: 0.2s; }
     .user-btn.active[data-user="mauii"] { background: var(--mauii-primary); color: #FFF; }
     .user-btn.active[data-user="moana"] { background: var(--moana-primary); color: #FFF; }
+    
     .card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
     .stats-title { font-size: 13px; color: var(--text-muted); }
     .stats-num { font-size: 32px; font-weight: 700; margin: 4px 0 10px; }
@@ -33,6 +34,9 @@
     .sub-stat { background: #F8FAF8; padding: 10px; border-radius: 12px; }
     .sub-stat-val { font-size: 18px; font-weight: 700; color: var(--text-main); }
     
+    .month-selector { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #F4F7F5; padding: 8px 12px; border-radius: 12px; }
+    .month-selector select { border: 1px solid var(--border-color); padding: 6px 10px; border-radius: 8px; font-size: 14px; background: #FFF; color: var(--text-main); font-weight: 600; }
+
     .checkin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
     .btn { width: 100%; border: none; padding: 14px 10px; border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; }
     .btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -81,6 +85,16 @@
   </div>
 
   <div class="card">
+    <!-- 月份切換選單 -->
+    <div class="month-selector">
+      <span style="font-size: 13px; font-weight: 600; color: var(--text-muted);">查看月份統計：</span>
+      <select id="selected-month" onchange="render()">
+        <option value="2026-10">2026 年 10 月</option>
+        <option value="2026-11" selected>2026 年 11 月</option>
+        <option value="2026-12">2026 年 12 月</option>
+      </select>
+    </div>
+
     <div class="stats-title" id="month-title">當月已達標總次數 (目標 10 次，一進一出 ≥ 4h)</div>
     <div class="stats-num" id="completed-count">0 次</div>
     <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill" style="width: 0%"></div></div>
@@ -148,13 +162,29 @@
     let activeUser = 'mauii';
     const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyAROfrrz8kH8cx4yRWJft8frMoEhG7SPYtPrgnqdECCN4yLjYysdU5nJ6wkf6X0urjvw/exec';
 
-    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v8')) || {
-      mauii: { currentCheckIn: null, records: [], dayStatus: {} },
-      moana: { currentCheckIn: null, records: [], dayStatus: {} }
+    // 預設 10 月歷史紀錄 (從截圖精確對應輸入)
+    const defaultOctoberRecords = [
+      { id: 1729200000001, checkIn: "2026-10-28T07:32:00", checkOut: "2026-10-28T20:57:00", hours: 13.4, isValid: true },
+      { id: 1729200000002, checkIn: "2026-10-27T00:03:00", checkOut: "2026-10-27T01:52:00", hours: 25.8, isValid: true },
+      { id: 1729200000003, checkIn: "2026-10-26T00:00:00", checkOut: "2026-10-26T07:38:00", hours: 7.6, isValid: true },
+      { id: 1729200000004, checkIn: "2026-10-20T23:29:00", checkOut: "2026-10-21T00:27:00", hours: 13.0, isValid: true },
+      { id: 1729200000005, checkIn: "2026-10-17T07:54:00", checkOut: "2026-10-17T07:54:00", hours: 0.0, isValid: false },
+      { id: 1729200000006, checkIn: "2026-10-15T23:17:00", checkOut: "2026-10-16T07:50:00", hours: 8.5, isValid: true },
+      { id: 1729200000007, checkIn: "2026-10-13T23:34:00", checkOut: "2026-10-14T07:52:00", hours: 8.3, isValid: true },
+      { id: 1729200000008, checkIn: "2026-10-12T23:20:00", checkOut: "2026-10-13T07:55:00", hours: 8.6, isValid: true },
+      { id: 1729200000009, checkIn: "2026-10-08T21:17:00", checkOut: "2026-10-09T07:42:00", hours: 10.4, isValid: true },
+      { id: 1729200000010, checkIn: "2026-10-06T21:31:00", checkOut: "2026-10-07T07:50:00", hours: 10.3, isValid: true },
+      { id: 1729200000011, checkIn: "2026-10-06T12:15:00", checkOut: "2026-10-06T07:42:00", hours: 7.5, isValid: true },
+      { id: 1729200000012, checkIn: "2026-10-01T21:32:00", checkOut: "2026-10-02T07:32:00", hours: 10.0, isValid: true }
+    ];
+
+    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v9')) || {
+      mauii: { currentCheckIn: null, records: defaultOctoberRecords, dayStatus: {} },
+      moana: { currentCheckIn: null, records: defaultOctoberRecords, dayStatus: {} }
     };
 
     function saveData() {
-      localStorage.setItem('dorm_app_data_v8', JSON.stringify(appData));
+      localStorage.setItem('dorm_app_data_v9', JSON.stringify(appData));
       render();
       syncToCloud(false);
     }
@@ -295,7 +325,7 @@
               appData[u].currentCheckIn = localIn;
             }
           });
-          localStorage.setItem('dorm_app_data_v8', JSON.stringify(appData));
+          localStorage.setItem('dorm_app_data_v9', JSON.stringify(appData));
           render();
           document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
           if (showAlert) alert('已成功從 Google 試算表載入最新資料！');
@@ -308,11 +338,17 @@
 
     function render() {
       const u = appData[activeUser];
-      const now = new Date();
-      const monthName = now.getMonth() + 1;
-      document.getElementById('month-title').innerText = `${monthName} 月已達標總次數 (目標 10 次，一進一出 ≥ 4h)`;
+      const selectedMonthVal = document.getElementById('selected-month').value; // e.g. "2026-10"
+      const [targetYear, targetMonth] = selectedMonthVal.split('-').map(Number);
 
-      const monthRecords = u.records.filter(r => new Date(r.checkIn).getMonth() === now.getMonth() && new Date(r.checkIn).getFullYear() === now.getFullYear());
+      document.getElementById('month-title').innerText = `${targetMonth} 月已達標總次數 (目標 10 次，一進一出 ≥ 4h)`;
+
+      // 過濾出目前選定月份的紀錄
+      const monthRecords = u.records.filter(r => {
+        const d = new Date(r.checkIn);
+        return (d.getMonth() + 1) === targetMonth && d.getFullYear() === targetYear;
+      });
+
       const validRecords = monthRecords.filter(r => r.isValid);
       const validCount = validRecords.length;
       const neededCount = Math.max(0, 10 - validCount);
@@ -343,10 +379,11 @@
         btnOut.disabled = true;
       }
 
+      // 渲染對應選定月份的行事曆
       const grid = document.getElementById('calendar-grid');
       grid.innerHTML = ['日','一','二','三','四','五','六'].map(h => `<div class="cal-day-header">${h}</div>`).join('');
-      const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
+      const totalDays = new Date(targetYear, targetMonth, 0).getDate();
+      const firstDay = new Date(targetYear, targetMonth - 1, 1).getDay();
       
       for (let i = 0; i < firstDay; i++) grid.innerHTML += '<div></div>';
       
@@ -355,7 +392,7 @@
       if (!u.dayStatus) u.dayStatus = {};
 
       for (let d = 1; d <= totalDays; d++) {
-        const dStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const dStr = `${targetYear}-${String(targetMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
         const status = u.dayStatus[dStr] || '';
         let label = ' ';
         if (status === 'stay') { stayCount++; label = '住宿'; }
@@ -375,8 +412,9 @@
         summaryEl.innerHTML = `<b style="color:var(--home-text);">⚠️ 還差 ${neededCount - stayCount} 天綠色住宿日才能湊滿 10 次</b>`;
       }
 
+      // 顯示當月歷史明細
       const listEl = document.getElementById('records-list');
-      listEl.innerHTML = u.records.map(r => {
+      listEl.innerHTML = monthRecords.map(r => {
         const dIn = new Date(r.checkIn);
         const dOut = new Date(r.checkOut);
         const dateStr = `${dIn.getMonth()+1}/${dIn.getDate()}`;
@@ -394,7 +432,7 @@
             </div>
           </div>
         `;
-      }).join('') || '<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:10px;">尚無一進一出刷卡紀錄</div>';
+      }).join('') || '<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:10px;">該月份尚無刷卡紀錄</div>';
     }
 
     const nowInit = new Date();

@@ -68,12 +68,12 @@
     .cal-day.stay { background: var(--stay-bg); color: var(--stay-text); border-color: var(--stay-border); font-weight: 700; }
     .cal-day.home { background: var(--home-bg); color: var(--home-text); border-color: var(--home-border); font-weight: 700; }
     
-    .record-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+    .record-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color); }
     .record-item:last-child { border-bottom: none; }
     .badge { padding: 3px 7px; border-radius: 6px; font-size: 10px; font-weight: 600; }
     .badge-success { background: #E8F3EE; color: #2E6B4E; }
     .badge-fail { background: #FDF0ED; color: #B84A39; }
-    .delete-btn { background: none; border: none; color: #C85A4B; font-size: 12px; cursor: pointer; padding: 4px 6px; margin-top: 2px; }
+    .delete-btn { background: none; border: none; color: #C85A4B; font-size: 12px; cursor: pointer; padding: 4px 6px; margin-top: 4px; }
     .sync-status { font-size: 11px; text-align: right; color: var(--text-muted); margin-top: 8px; }
   </style>
 </head>
@@ -161,9 +161,9 @@
     let activeUser = 'mauii';
     const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyAROfrrz8kH8cx4yRWJft8frMoEhG7SPYtPrgnqdECCN4yLjYysdU5nJ6wkf6X0urjvw/exec';
 
-    // 精確審閱後的 10 月與 11 月標準紀錄（已過濾重複，確保一進一出正確配對）
+    // 重新審閱、過濾重複，並精確對應 10、11 月標準跨日紀錄
     const cleanRecords = [
-      // 11月紀錄
+      // 11 月紀錄[cite: 6]
       { id: 1731800000001, checkIn: "2026-11-17T07:46:00", checkOut: "2026-11-17T07:47:00", hours: 0.0, isValid: false },
       { id: 1731800000002, checkIn: "2026-11-16T16:53:00", checkOut: "2026-11-16T21:16:00", hours: 4.4, isValid: true },
       { id: 1731800000003, checkIn: "2026-11-13T00:16:00", checkOut: "2026-11-13T11:27:00", hours: 11.2, isValid: true },
@@ -172,7 +172,7 @@
       { id: 1731800000006, checkIn: "2026-11-05T23:23:00", checkOut: "2026-11-06T07:52:00", hours: 8.5, isValid: true },
       { id: 1731800000007, checkIn: "2026-11-04T22:35:00", checkOut: "2026-11-05T08:16:00", hours: 9.7, isValid: true },
       
-      // 10月紀錄
+      // 10 月紀錄
       { id: 1729200000001, checkIn: "2026-10-28T07:32:00", checkOut: "2026-10-28T20:57:00", hours: 13.4, isValid: true },
       { id: 1729200000002, checkIn: "2026-10-27T00:03:00", checkOut: "2026-10-27T01:52:00", hours: 25.8, isValid: true },
       { id: 1729200000003, checkIn: "2026-10-26T00:00:00", checkOut: "2026-10-26T07:38:00", hours: 7.6, isValid: true },
@@ -187,13 +187,13 @@
       { id: 1729200000012, checkIn: "2026-10-01T21:32:00", checkOut: "2026-10-02T07:32:00", hours: 10.0, isValid: true }
     ];
 
-    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v11')) || {
+    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v12')) || {
       mauii: { currentCheckIn: null, records: cleanRecords, dayStatus: {} },
       moana: { currentCheckIn: null, records: cleanRecords, dayStatus: {} }
     };
 
     function saveData() {
-      localStorage.setItem('dorm_app_data_v11', JSON.stringify(appData));
+      localStorage.setItem('dorm_app_data_v12', JSON.stringify(appData));
       render();
       syncToCloud(false);
     }
@@ -334,7 +334,7 @@
               appData[u].currentCheckIn = localIn;
             }
           });
-          localStorage.setItem('dorm_app_data_v11', JSON.stringify(appData));
+          localStorage.setItem('dorm_app_data_v12', JSON.stringify(appData));
           render();
           document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
           if (showAlert) alert('已成功從 Google 試算表載入最新資料！');
@@ -352,6 +352,7 @@
 
       document.getElementById('month-title').innerText = `${targetMonth} 月已達標總次數 (目標 10 次，一進一出 ≥ 4h)`;
 
+      // 嚴謹歸屬：以「進入時間 (checkIn)」的月份作為該筆紀錄歸屬的月份
       const monthRecords = u.records.filter(r => {
         const d = new Date(r.checkIn);
         return (d.getMonth() + 1) === targetMonth && d.getFullYear() === targetYear;
@@ -419,22 +420,30 @@
         summaryEl.innerHTML = `<b style="color:var(--home-text);">⚠️ 還差 ${neededCount - stayCount} 天綠色住宿日才能湊滿 10 次</b>`;
       }
 
-      // 渲染歷史明細：明確顯示「幾月幾號幾點進 ➔ 幾月幾號幾點出」
+      // 渲染歷史明細：明確支援跨日顯示格式（例如：10/6 下午09:31 ➔ 10/7 上午07:50）
       const listEl = document.getElementById('records-list');
       listEl.innerHTML = monthRecords.map(r => {
         const dIn = new Date(r.checkIn);
         const dOut = new Date(r.checkOut);
         
-        const inStr = `${dIn.getMonth()+1}/${dIn.getDate()} ${dIn.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
-        const outStr = `${dOut.getMonth()+1}/${dOut.getDate()} ${dOut.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+        // 格式化「月/日 上/下午時:分」
+        const formatDateTime = (date) => {
+          const m = date.getMonth() + 1;
+          const day = date.getDate();
+          const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: true});
+          return `${m}/${day} ${timeStr}`;
+        };
+
+        const inStr = formatDateTime(dIn);
+        const outStr = formatDateTime(dOut);
 
         return `
           <div class="record-item">
             <div>
-              <div style="font-size:13px; font-weight:600; color:var(--text-main);">停留 ${r.hours} 小時</div>
-              <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                📥 <b>${inStr}</b> 進<br>
-                📤 <b>${outStr}</b> 出
+              <div style="font-size:13px; font-weight:600; color:var(--text-main); margin-bottom:4px;">停留 ${r.hours} 小時</div>
+              <div style="font-size:11px; color:var(--text-muted); line-height: 1.4;">
+                进 ${inStr}<br>
+                出 ${outStr}
               </div>
             </div>
             <div style="text-align:right;">

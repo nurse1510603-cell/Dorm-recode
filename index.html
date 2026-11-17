@@ -161,14 +161,14 @@
     let activeUser = 'mauii';
     const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyAROfrrz8kH8cx4yRWJft8frMoEhG7SPYtPrgnqdECCN4yLjYysdU5nJ6wkf6X0urjvw/exec';
 
-   
-    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v15')) || {
-      mauii: { currentCheckIn: null, records: cleanRecords, dayStatus: {} },
-      moana: { currentCheckIn: null, records: cleanRecords, dayStatus: {} }
+    // 初始清空所有預設紀錄，改由手動自行 key in
+    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v16')) || {
+      mauii: { currentCheckIn: null, records: [], dayStatus: {} },
+      moana: { currentCheckIn: null, records: [], dayStatus: {} }
     };
 
     function saveData() {
-      localStorage.setItem('dorm_app_data_v15', JSON.stringify(appData));
+      localStorage.setItem('dorm_app_data_v16', JSON.stringify(appData));
       render();
       syncToCloud(false);
     }
@@ -218,6 +218,7 @@
     }
 
     function addManualRecord() {
+      const u = appData[activeUser];
       const inVal = document.getElementById('manual-in').value;
       const outVal = document.getElementById('manual-out').value;
       if (!inVal || !outVal) return alert('請完整輸入「進入時間」與「離開時間」！');
@@ -288,7 +289,7 @@
       })
       .then(() => {
         document.getElementById('sync-status-text').innerText = '雲端狀態：已同步至 Google 試算表 ✔';
-        if (showAlert) alert('成功發送同步至 Google 試算表（已自動防重複）！');
+        if (showAlert) alert('成功發送同步至 Google 試算表！');
       })
       .catch(() => {
         document.getElementById('sync-status-text').innerText = '雲端狀態：離線儲存中';
@@ -316,7 +317,7 @@
               appData[u].currentCheckIn = localIn;
             }
           });
-          localStorage.setItem('dorm_app_data_v15', JSON.stringify(appData));
+          localStorage.setItem('dorm_app_data_v16', JSON.stringify(appData));
           render();
           document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
           if (showAlert) alert('已成功從 Google 試算表載入最新資料！');
@@ -336,7 +337,7 @@
 
       const uniqueMap = {};
       u.records.forEach(r => { uniqueMap[r.id] = r; });
-      const cleanList = Object.values(cleanRecords.concat(Object.values(uniqueMap)));
+      const cleanList = Object.values(uniqueMap);
       
       const monthRecords = cleanList.filter(r => {
         const d = new Date(r.checkIn);

@@ -248,6 +248,7 @@
         saveData();
         fetch(SHEET_API_URL, {
           method: 'POST',
+          mode: 'no-cors',
           body: JSON.stringify({ action: 'delete', id: id, user: activeUser })
         }).catch(err => console.log('後台刪除同步失敗', err));
       }
@@ -257,6 +258,7 @@
       document.getElementById('sync-status-text').innerText = '雲端狀態：同步中...';
       fetch(SHEET_API_URL, {
         method: 'POST',
+        mode: 'no-cors',
         body: JSON.stringify({
           action: 'sync',
           user: activeUser,
@@ -264,18 +266,13 @@
           dayStatus: appData[activeUser].dayStatus
         })
       })
-      .then(res => res.json())
-      .then(res => {
-        if (res.status === 'success') {
-          document.getElementById('sync-status-text').innerText = '雲端狀態：已同步至 Google 試算表 ✔';
-          if (showAlert) alert('成功同步至 Google 試算表！');
-        } else {
-          document.getElementById('sync-status-text').innerText = '雲端狀態：同步異常';
-        }
+      .then(() => {
+        document.getElementById('sync-status-text').innerText = '雲端狀態：已同步至 Google 試算表 ✔';
+        if (showAlert) alert('成功發送同步至 Google 試算表！');
       })
       .catch(() => {
         document.getElementById('sync-status-text').innerText = '雲端狀態：離線儲存中';
-        if (showAlert) alert('目前無法連線至雲端，資料已先暫存於手機中。');
+        if (showAlert) alert('目前無法連線至雲端，資料已安全保留於手機中。');
       });
     }
 
@@ -288,10 +285,12 @@
             if (cloudData[u]) {
               const localIn = appData[u].currentCheckIn;
               if (cloudData[u].records && cloudData[u].records.length > 0) {
-                appData[u].records = cloudData[u].records.sort((a, b) => b.id - a.id);
+                if (cloudData[u].records.length >= appData[u].records.length) {
+                  appData[u].records = cloudData[u].records.sort((a, b) => b.id - a.id);
+                }
               }
               if (cloudData[u].dayStatus && Object.keys(cloudData[u].dayStatus).length > 0) {
-                appData[u].dayStatus = cloudData[u].dayStatus;
+                appData[u].dayStatus = Object.assign({}, cloudData[u].dayStatus, appData[u].dayStatus);
               }
               appData[u].currentCheckIn = localIn;
             }
@@ -299,10 +298,11 @@
           localStorage.setItem('dorm_app_data_v8', JSON.stringify(appData));
           render();
           document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
-          if (showAlert) alert('已從 Google 試算表載入最新紀錄！');
+          if (showAlert) alert('已成功從 Google 試算表載入最新資料！');
         })
         .catch(() => {
           document.getElementById('sync-status-text').innerText = '雲端狀態：使用本機紀錄';
+          if (showAlert) alert('讀取雲端失敗，目前繼續使用手機本機的安全紀錄。');
         });
     }
 

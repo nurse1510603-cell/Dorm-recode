@@ -1,112 +1,410 @@
-function doPost(e) {
-  var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
-  
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var action = data.action;
-    var user = data.user;
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    // 確保分頁存在
-    var recSheet = ss.getSheetByName('Records') || ss.insertSheet('Records');
-    var calSheet = ss.getSheetByName('Calendar') || ss.insertSheet('Calendar');
-    
-    if (recSheet.getLastRow() === 0) {
-      recSheet.appendRow(['id', 'user', 'checkIn', 'checkOut', 'hours', 'isValid', 'status']);
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>宿舍進出刷卡紀錄 - 雲端連線版</title>
+  <style>
+    :root {
+      --bg-color: #F2F4F1; --card-bg: #FFFFFF; --text-main: #2D3B33; --text-muted: #6B7C72;
+      --border-color: #E2E8E4; --mauii-primary: #5B7B6B; --moana-primary: #A67C52;
+      --stay-bg: #E3F2E8; --stay-text: #22663D; --stay-border: #98D1AE;
+      --home-bg: #FFF1E3; --home-text: #B85614; --home-border: #F5B887;
     }
-    if (calSheet.getLastRow() === 0) {
-      calSheet.appendRow(['user', 'date', 'status']); // status: 'stay'(綠) 或 'home'(橘)
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color); color: var(--text-main); padding: 16px;
+      max-width: 500px; margin: 0 auto; padding-bottom: 40px;
+    }
+    .user-toggle { display: flex; background: #E4E8E4; border-radius: 16px; padding: 4px; margin-bottom: 16px; }
+    .user-btn { flex: 1; border: none; padding: 12px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--text-muted); background: transparent; transition: 0.2s; }
+    .user-btn.active[data-user="mauii"] { background: var(--mauii-primary); color: #FFF; }
+    .user-btn.active[data-user="moana"] { background: var(--moana-primary); color: #FFF; }
+    .card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
+    .stats-title { font-size: 13px; color: var(--text-muted); }
+    .stats-num { font-size: 32px; font-weight: 700; margin: 4px 0 10px; }
+    .progress-bar-bg { height: 8px; background: #E8ECE9; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+    .progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+    body[data-active="mauii"] .progress-bar-fill { background: var(--mauii-primary); }
+    body[data-active="moana"] .progress-bar-fill { background: var(--moana-primary); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sub-stat { background: #F8FAF8; padding: 10px; border-radius: 12px; }
+    .sub-stat-val { font-size: 18px; font-weight: 700; color: var(--text-main); }
+    
+    .checkin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+    .btn { width: 100%; border: none; padding: 14px 10px; border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-in { background: #4A7A62; color: #FFF; }
+    .btn-out { background: #C4663B; color: #FFF; }
+    .btn-secondary { background: #EAEFEA; color: var(--text-main); margin-top: 10px; }
+    .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px; padding: 10px; }
+    
+    .status-banner {
+      background: #F4F7F5; border-radius: 12px; padding: 10px 12px; font-size: 13px;
+      margin-bottom: 8px; border-left: 4px solid var(--mauii-primary); line-height: 1.5;
+    }
+    body[data-active="moana"] .status-banner { border-left-color: var(--moana-primary); }
+    .status-banner.in-dorm { background: #FFF6F0; border-left-color: #C4663B; }
+
+    .form-group { margin-top: 10px; text-align: left; }
+    .form-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .form-group input { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--border-color); font-size: 14px; }
+    
+    .cal-legend { display: flex; gap: 10px; font-size: 11px; margin: 6px 0 8px; color: var(--text-muted); }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; text-align: center; }
+    .cal-day-header { font-size: 11px; color: var(--text-muted); padding-bottom: 2px; }
+    .cal-day {
+      padding: 7px 0; border-radius: 8px; background: #F8FAF8; border: 1px solid var(--border-color);
+      font-size: 12px; cursor: pointer; user-select: none; line-height: 1.2;
+    }
+    .cal-day span { display: block; font-size: 9px; margin-top: 2px; }
+    .cal-day.stay { background: var(--stay-bg); color: var(--stay-text); border-color: var(--stay-border); font-weight: 700; }
+    .cal-day.home { background: var(--home-bg); color: var(--home-text); border-color: var(--home-border); font-weight: 700; }
+    
+    .record-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+    .record-item:last-child { border-bottom: none; }
+    .badge { padding: 3px 7px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+    .badge-success { background: #E8F3EE; color: #2E6B4E; }
+    .badge-fail { background: #FDF0ED; color: #B84A39; }
+    .delete-btn { background: none; border: none; color: #C85A4B; font-size: 12px; cursor: pointer; padding: 4px 6px; margin-top: 2px; }
+    .sync-status { font-size: 11px; text-align: right; color: var(--text-muted); margin-top: 8px; }
+  </style>
+</head>
+<body data-active="mauii">
+
+  <div class="user-toggle">
+    <button class="user-btn active" data-user="mauii" onclick="switchUser('mauii')">Mauii</button>
+    <button class="user-btn" data-user="moana" onclick="switchUser('moana')">Moana</button>
+  </div>
+
+  <div class="card">
+    <div class="stats-title" id="month-title">當月已達標總次數 (目標 10 次，一進一出 ≥ 4h)</div>
+    <div class="stats-num" id="completed-count">0 次</div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill" style="width: 0%"></div></div>
+    <div class="grid-2">
+      <div class="sub-stat"><div class="stats-title">還需達標次數</div><div class="sub-stat-val" id="remaining-count">10 次</div></div>
+      <div class="sub-stat"><div class="stats-title">當月有效/總筆數</div><div class="sub-stat-val" id="total-records">0 / 0 筆</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stats-title" style="margin-bottom: 8px;">一進一出刷卡（間隔滿 4 小時算 1 次）</div>
+    <div id="checkin-status" class="status-banner">目前狀態：尚未刷卡進入宿舍</div>
+    
+    <div class="checkin-actions">
+      <button class="btn btn-in" id="btn-in" onclick="checkIn()">刷卡進入宿舍</button>
+      <button class="btn btn-out" id="btn-out" onclick="checkOut()" disabled>刷卡離開宿舍</button>
+    </div>
+    
+    <details style="margin-top: 14px;">
+      <summary style="font-size: 13px; color: var(--text-muted); cursor: pointer;">手動補登「一進一出」時間</summary>
+      <div class="form-group">
+        <label>進入宿舍時間</label>
+        <input type="datetime-local" id="manual-in">
+      </div>
+      <div class="form-group">
+        <label>離開宿舍時間（需間隔 ≥ 4 小時才計為達標）</label>
+        <input type="datetime-local" id="manual-out">
+      </div>
+      <button class="btn btn-secondary" onclick="addManualRecord()">確認補登一進一出紀錄</button>
+    </details>
+
+    <div class="sync-status" id="sync-status-text">雲端狀態：連線準備中...</div>
+  </div>
+
+  <div class="card">
+    <div class="stats-title">📅 月份排程行事曆（點擊切換 住宿 / 回家）</div>
+    <div class="cal-legend">
+      <div><span class="legend-dot" style="background:var(--stay-bg); border:1px solid var(--stay-border);"></span>住宿舍 (綠)</div>
+      <div><span class="legend-dot" style="background:var(--home-bg); border:1px solid var(--home-border);"></span>回家 (橘)</div>
+      <div><span class="legend-dot" style="background:#F8FAF8; border:1px solid var(--border-color);"></span>未排定</div>
+    </div>
+    
+    <div class="calendar-grid" id="calendar-grid"></div>
+    
+    <div style="font-size: 12px; margin-top: 12px; background:#F4F7F5; padding:10px; border-radius:10px; line-height:1.6;">
+      🟢 預計住宿舍：<b id="calc-stay-days" style="color:var(--stay-text);">0</b> 天 ｜ 
+      🟠 規劃回家：<b id="calc-home-days" style="color:var(--home-text);">0</b> 天<br>
+      📊 達成評估：<span id="calc-summary">請點選日期安排住宿或回家</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="stats-title" style="margin-bottom: 8px;">刷卡歷史明細（一進一出配對）</div>
+    <div id="records-list"></div>
+  </div>
+
+  <div class="card" style="text-align: center;">
+    <div class="grid-2">
+      <button class="btn btn-outline" onclick="loadFromCloud(true)">從雲端載入最新資料</button>
+      <button class="btn btn-outline" onclick="syncToCloud(true)">立即同步至雲端</button>
+    </div>
+  </div>
+
+  <script>
+    let activeUser = 'mauii';
+    const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbyAROfrrz8kH8cx4yRWJft8frMoEhG7SPYtPrgnqdECCN4yLjYysdU5nJ6wkf6X0urjvw/exec';
+
+    let appData = JSON.parse(localStorage.getItem('dorm_app_data_v8')) || {
+      mauii: { currentCheckIn: null, records: [], dayStatus: {} },
+      moana: { currentCheckIn: null, records: [], dayStatus: {} }
+    };
+
+    function saveData() {
+      localStorage.setItem('dorm_app_data_v8', JSON.stringify(appData));
+      render();
+      syncToCloud(false);
     }
 
-    // 1. 刪除單筆刷卡紀錄
-    if (action === 'delete') {
-      var recordId = String(data.id);
-      var rows = recSheet.getDataRange().getValues();
-      for (var i = rows.length - 1; i >= 1; i--) {
-        if (String(rows[i][0]) === recordId) {
-          recSheet.deleteRow(i + 1);
-          break;
-        }
-      }
-      return ContentService.createTextOutput(JSON.stringify({status: 'success', deleted: recordId})).setMimeType(ContentService.MimeType.JSON);
+    function switchUser(user) {
+      activeUser = user;
+      document.body.setAttribute('data-active', user);
+      document.querySelectorAll('.user-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-user') === user));
+      render();
     }
-    
-    // 2. 同步刷卡紀錄與行事曆狀態
-    if (data.records) {
-      var allRows = recSheet.getDataRange().getValues();
-      for (var i = allRows.length - 1; i >= 1; i--) {
-        if (allRows[i][1] === user) {
-          recSheet.deleteRow(i + 1);
+
+    function checkIn() {
+      const u = appData[activeUser];
+      if (u.currentCheckIn) {
+        return alert('您目前已在宿舍內，請先「刷卡離開宿舍」完成本次配對！');
+      }
+      u.currentCheckIn = new Date().toISOString();
+      saveData();
+    }
+
+    function checkOut() {
+      const u = appData[activeUser];
+      if (!u.currentCheckIn) {
+        return alert('尚未有進入紀錄，請先點選「刷卡進入宿舍」！');
+      }
+      const now = new Date();
+      const inTime = new Date(u.currentCheckIn);
+      const hours = (now - inTime) / 3600000;
+
+      if (hours < 4) {
+        const remainMins = Math.ceil((4 - hours) * 60);
+        const proceed = confirm(
+          `⚠️ 目前僅停留 ${hours.toFixed(1)} 小時，尚未滿 4 小時（還差約 ${remainMins} 分鐘）！\n\n若現在刷卡離開，此次「一進一出」將不計入達標次數。\n確定要現在離開嗎？`
+        );
+        if (!proceed) return;
+      }
+
+      u.records.unshift({
+        id: Date.now(),
+        checkIn: u.currentCheckIn,
+        checkOut: now.toISOString(),
+        hours: parseFloat(hours.toFixed(1)),
+        isValid: hours >= 4
+      });
+      u.currentCheckIn = null;
+      saveData();
+    }
+
+    function addManualRecord() {
+      const inVal = document.getElementById('manual-in').value;
+      const outVal = document.getElementById('manual-out').value;
+      if (!inVal || !outVal) return alert('請完整輸入「進入時間」與「離開時間」！');
+      
+      const hours = (new Date(outVal) - new Date(inVal)) / 3600000;
+      if (hours <= 0) return alert('離開時間必須晚於進入時間！');
+
+      if (hours < 4) {
+        if (!confirm(`此筆區間為 ${hours.toFixed(1)} 小時（未滿 4 小時，不計入達標次數），仍要補登嗎？`)) {
+          return;
         }
       }
-      data.records.forEach(function(r) {
-        recSheet.appendRow([r.id, user, r.checkIn, r.checkOut, r.hours, r.isValid, 'active']);
+
+      appData[activeUser].records.unshift({
+        id: Date.now(),
+        checkIn: new Date(inVal).toISOString(),
+        checkOut: new Date(outVal).toISOString(),
+        hours: parseFloat(hours.toFixed(1)),
+        isValid: hours >= 4
+      });
+
+      saveData();
+      alert(hours >= 4 ? '補登成功（已計入達標 1 次）並同步至雲端！' : '補登成功（未滿 4h，已記錄於明細）！');
+    }
+
+    function toggleDayStatus(dateStr) {
+      if (!appData[activeUser].dayStatus) appData[activeUser].dayStatus = {};
+      const current = appData[activeUser].dayStatus[dateStr];
+      if (!current) {
+        appData[activeUser].dayStatus[dateStr] = 'stay';
+      } else if (current === 'stay') {
+        appData[activeUser].dayStatus[dateStr] = 'home';
+      } else {
+        delete appData[activeUser].dayStatus[dateStr];
+      }
+      saveData();
+    }
+
+    function deleteRecord(id) {
+      if (confirm('確定刪除此筆一進一出紀錄？Google 試算表後台也會同步刪除')) {
+        appData[activeUser].records = appData[activeUser].records.filter(r => r.id !== id);
+        saveData();
+        fetch(SHEET_API_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'delete', id: id, user: activeUser })
+        }).catch(err => console.log('後台刪除同步失敗', err));
+      }
+    }
+
+    function syncToCloud(showAlert = true) {
+      document.getElementById('sync-status-text').innerText = '雲端狀態：同步中...';
+      fetch(SHEET_API_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'sync',
+          user: activeUser,
+          records: appData[activeUser].records,
+          dayStatus: appData[activeUser].dayStatus
+        })
+      })
+      .then(res => res.json())
+      .then(res => {
+        if (res.status === 'success') {
+          document.getElementById('sync-status-text').innerText = '雲端狀態：已同步至 Google 試算表 ✔';
+          if (showAlert) alert('成功同步至 Google 試算表！');
+        } else {
+          document.getElementById('sync-status-text').innerText = '雲端狀態：同步異常';
+        }
+      })
+      .catch(() => {
+        document.getElementById('sync-status-text').innerText = '雲端狀態：離線儲存中';
+        if (showAlert) alert('目前無法連線至雲端，資料已先暫存於手機中。');
       });
     }
 
-    if (data.dayStatus) {
-      var calRows = calSheet.getDataRange().getValues();
-      for (var j = calRows.length - 1; j >= 1; j--) {
-        if (calRows[j][0] === user) {
-          calSheet.deleteRow(j + 1);
-        }
-      }
-      var dates = Object.keys(data.dayStatus);
-      dates.forEach(function(d) {
-        if (data.dayStatus[d]) {
-          calSheet.appendRow([user, d, data.dayStatus[d] === 'stay' ? '住宿舍(綠)' : '可回家(橘)']);
-        }
-      });
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({status: 'success'})).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({status: 'error', message: err.toString()})).setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// 支援從雲端讀取最新資料（換手機或重新整理時不會遺失）
-function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var recSheet = ss.getSheetByName('Records');
-  var calSheet = ss.getSheetByName('Calendar');
-  
-  var result = {
-    mauii: { records: [], dayStatus: {} },
-    moana: { records: [], dayStatus: {} }
-  };
-  
-  if (recSheet && recSheet.getLastRow() > 1) {
-    var rData = recSheet.getDataRange().getValues();
-    for (var i = 1; i < rData.length; i++) {
-      var u = rData[i][1];
-      if (result[u]) {
-        result[u].records.push({
-          id: Number(rData[i][0]),
-          checkIn: rData[i][2],
-          checkOut: rData[i][3],
-          hours: Number(rData[i][4]),
-          isValid: rData[i][5] === true || rData[i][5] === 'true'
+    function loadFromCloud(showAlert = false) {
+      document.getElementById('sync-status-text').innerText = '雲端狀態：讀取雲端資料中...';
+      fetch(SHEET_API_URL)
+        .then(res => res.json())
+        .then(cloudData => {
+          ['mauii', 'moana'].forEach(u => {
+            if (cloudData[u]) {
+              const localIn = appData[u].currentCheckIn;
+              if (cloudData[u].records && cloudData[u].records.length > 0) {
+                appData[u].records = cloudData[u].records.sort((a, b) => b.id - a.id);
+              }
+              if (cloudData[u].dayStatus && Object.keys(cloudData[u].dayStatus).length > 0) {
+                appData[u].dayStatus = cloudData[u].dayStatus;
+              }
+              appData[u].currentCheckIn = localIn;
+            }
+          });
+          localStorage.setItem('dorm_app_data_v8', JSON.stringify(appData));
+          render();
+          document.getElementById('sync-status-text').innerText = '雲端狀態：已與試算表同步 ✔';
+          if (showAlert) alert('已從 Google 試算表載入最新紀錄！');
+        })
+        .catch(() => {
+          document.getElementById('sync-status-text').innerText = '雲端狀態：使用本機紀錄';
         });
-      }
     }
-  }
-  
-  if (calSheet && calSheet.getLastRow() > 1) {
-    var cData = calSheet.getDataRange().getValues();
-    for (var j = 1; j < cData.length; j++) {
-      var u = cData[j][0];
-      var d = cData[j][1];
-      var st = cData[j][2];
-      if (result[u] && d) {
-        var dateKey = (d instanceof Date) ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(d);
-        result[u].dayStatus[dateKey] = st.indexOf('stay') > -1 || st.indexOf('綠') > -1 ? 'stay' : 'home';
+
+    function render() {
+      const u = appData[activeUser];
+      const now = new Date();
+      const monthName = now.getMonth() + 1;
+      document.getElementById('month-title').innerText = `${monthName} 月已達標總次數 (目標 10 次，一進一出 ≥ 4h)`;
+
+      const monthRecords = u.records.filter(r => new Date(r.checkIn).getMonth() === now.getMonth() && new Date(r.checkIn).getFullYear() === now.getFullYear());
+      const validRecords = monthRecords.filter(r => r.isValid);
+      const validCount = validRecords.length;
+      const neededCount = Math.max(0, 10 - validCount);
+
+      document.getElementById('completed-count').innerText = `${validCount} 次`;
+      document.getElementById('remaining-count').innerText = `${neededCount} 次`;
+      document.getElementById('total-records').innerText = `${validCount} / ${monthRecords.length} 筆`;
+      document.getElementById('progress-fill').style.width = `${Math.min(100, (validCount / 10) * 100)}%`;
+
+      const btnIn = document.getElementById('btn-in');
+      const btnOut = document.getElementById('btn-out');
+      const statusBanner = document.getElementById('checkin-status');
+
+      if (u.currentCheckIn) {
+        const inDate = new Date(u.currentCheckIn);
+        const targetDate = new Date(inDate.getTime() + 4 * 3600000);
+        const inTimeStr = inDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const targetTimeStr = targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        statusBanner.className = 'status-banner in-dorm';
+        statusBanner.innerHTML = `🟢 <b>已刷卡進入宿舍</b>（${inTimeStr}）<br>⏳ 滿 4 小時達標時間：<b>${targetTimeStr}</b> 後可刷卡離開`;
+        btnIn.disabled = true;
+        btnOut.disabled = false;
+      } else {
+        statusBanner.className = 'status-banner';
+        statusBanner.innerHTML = `⚪ 目前狀態：<b>在宿舍外</b>（請先刷卡進入，再刷卡離開）`;
+        btnIn.disabled = false;
+        btnOut.disabled = true;
       }
+
+      const grid = document.getElementById('calendar-grid');
+      grid.innerHTML = ['日','一','二','三','四','五','六'].map(h => `<div class="cal-day-header">${h}</div>`).join('');
+      const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
+      
+      for (let i = 0; i < firstDay; i++) grid.innerHTML += '<div></div>';
+      
+      let stayCount = 0;
+      let homeCount = 0;
+      if (!u.dayStatus) u.dayStatus = {};
+
+      for (let d = 1; d <= totalDays; d++) {
+        const dStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const status = u.dayStatus[dStr] || '';
+        let label = ' ';
+        if (status === 'stay') { stayCount++; label = '住宿'; }
+        if (status === 'home') { homeCount++; label = '回家'; }
+        grid.innerHTML += `<div class="cal-day ${status}" onclick="toggleDayStatus('${dStr}')">${d}<span>${label}</span></div>`;
+      }
+      
+      document.getElementById('calc-stay-days').innerText = stayCount;
+      document.getElementById('calc-home-days').innerText = homeCount;
+
+      const summaryEl = document.getElementById('calc-summary');
+      if (neededCount === 0) {
+        summaryEl.innerHTML = `<b style="color:var(--stay-text);">🎉 本月已達成 10 次目標！其餘日期皆可自由安排回家</b>`;
+      } else if (stayCount >= neededCount) {
+        summaryEl.innerHTML = `<b style="color:var(--stay-text);">✅ 綠色住宿天數（${stayCount}天）足夠完成剩餘 ${neededCount} 次！</b>`;
+      } else {
+        summaryEl.innerHTML = `<b style="color:var(--home-text);">⚠️ 還差 ${neededCount - stayCount} 天綠色住宿日才能湊滿 10 次</b>`;
+      }
+
+      const listEl = document.getElementById('records-list');
+      listEl.innerHTML = u.records.map(r => {
+        const dIn = new Date(r.checkIn);
+        const dOut = new Date(r.checkOut);
+        const dateStr = `${dIn.getMonth()+1}/${dIn.getDate()}`;
+        const tIn = dIn.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        const tOut = dOut.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        return `
+          <div class="record-item">
+            <div>
+              <div style="font-size:13px; font-weight:600;">${dateStr} ｜ 停留 ${r.hours} 小時</div>
+              <div style="font-size:11px; color:var(--text-muted);">進 ${tIn} ➔ 出 ${tOut}</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="badge ${r.isValid?'badge-success':'badge-fail'}">${r.isValid?'達標 (≥4h)':'未滿 4h'}</span><br>
+              <button class="delete-btn" onclick="deleteRecord(${r.id})">刪除</button>
+            </div>
+          </div>
+        `;
+      }).join('') || '<div style="font-size:12px; color:var(--text-muted); text-align:center; padding:10px;">尚無一進一出刷卡紀錄</div>';
     }
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-}
+
+    const nowInit = new Date();
+    const localNow = new Date(nowInit.getTime() - nowInit.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const fourHrsAgo = new Date(nowInit.getTime() - (4 * 3600000) - nowInit.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    document.getElementById('manual-out').value = localNow;
+    document.getElementById('manual-in').value = fourHrsAgo;
+
+    render();
+    loadFromCloud(false);
+  </script>
+</body>
+</html>
